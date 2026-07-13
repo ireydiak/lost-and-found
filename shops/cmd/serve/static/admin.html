@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — bike shops of Montreal</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; }
+  header {
+    position: sticky; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    padding: 12px 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  nav a { color: #1565c0; text-decoration: none; font-size: 14px; margin-right: 10px; }
+  nav a:hover { text-decoration: underline; }
+  main { max-width: 860px; margin: 16px auto; padding: 0 12px 40px; }
+  #tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  #tabs button {
+    background: #fff; border: 1px solid #ccc; border-radius: 16px; padding: 5px 14px;
+    font: inherit; font-size: 14px; cursor: pointer;
+  }
+  #tabs button.on { background: #1565c0; border-color: #1565c0; color: #fff; }
+  .card { background: #fff; border-radius: 8px; padding: 14px 18px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .card-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .kind { font-size: 12px; padding: 2px 10px; border-radius: 10px; color: #fff; }
+  .kind.create { background: #2e7d32; } .kind.update { background: #1565c0; }
+  .card-head a { color: #1565c0; text-decoration: none; font-weight: 600; }
+  .meta { color: #888; font-size: 13px; margin-left: auto; }
+  table { border-collapse: collapse; margin-top: 10px; font-size: 14px; width: 100%; }
+  th, td { text-align: left; padding: 4px 12px 4px 0; vertical-align: top; overflow-wrap: anywhere; }
+  th { color: #888; font-weight: 500; font-size: 12px; }
+  td.field { color: #555; white-space: nowrap; }
+  td.old { color: #999; }
+  td.new { font-weight: 600; }
+  .actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+  .actions button { border: none; border-radius: 6px; padding: 7px 16px; font: inherit; cursor: pointer; color: #fff; }
+  .approve { background: #2e7d32; } .reject { background: #c62828; }
+  .actions .note { font-size: 13px; color: #c62828; }
+  .empty, #guard { text-align: center; color: #888; padding: 40px 0; }
+  #guard a { color: #1565c0; margin: 0 6px; }
+  .section-title { font-size: 16px; margin: 24px 0 10px; }
+  #admins td { padding: 6px 16px 6px 0; }
+  .source { font-size: 12px; color: #888; }
+  .revoke { background: none; border: none; color: #c62828; cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
+  .revoke:hover { text-decoration: underline; }
+  #grant { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  #grant input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font: inherit; width: 260px; }
+  .grant-btn { background: #1565c0; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font: inherit; cursor: pointer; }
+  #grant-note { font-size: 13px; color: #c62828; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Admin — submissions</h1>
+  <nav><a href="/shops.html">All shops</a><a href="/">Map view</a></nav>
+</header>
+<main>
+  <div id="guard">Loading…</div>
+  <div id="panel" hidden>
+    <div id="tabs">
+      <button data-status="pending" class="on">Pending</button>
+      <button data-status="approved">Approved</button>
+      <button data-status="rejected">Rejected</button>
+    </div>
+    <div id="cards"></div>
+
+    <h2 class="section-title">Administrators</h2>
+    <div class="card">
+      <table id="admins"></table>
+      <form id="grant">
+        <input type="email" id="grant-email" placeholder="colleague@example.com" required>
+        <button type="submit" class="grant-btn">Grant admin</button>
+        <span id="grant-note"></span>
+      </form>
+    </div>
+  </div>
+</main>
+
+<script>
+  const fields = ['name', 'status', 'phone', 'email', 'website', 'instagram_url', 'facebook_url'];
+  const addressFields = ['street_number', 'street_name', 'city', 'borough', 'postal_code'];
+  let current = 'pending';
+
+  // flatten a shop or payload into label -> display value, keeping nulls out
+  function flatten(obj) {
+    const out = new Map();
+    if (!obj) return out;
+    for (const f of fields) {
+      if (obj[f] !== null && obj[f] !== undefined) out.set(f.replace('_url', ''), obj[f]);
+    }
+    if (obj.address) {
+      for (const f of addressFields) {
+        const v = obj.address[f];
+        if (v !== null && v !== undefined) out.set(f.replace('_', ' '), v);
+      }
+    }
+    if (obj.location) out.set('location', obj.location.lat.toFixed(6) + ', ' + obj.location.lon.toFixed(6));
+    return out;
+  }
+
+  function diffTable(payload, currentShop) {
+    const proposed = flatten(payload);
+    const before = flatten(currentShop);
+    const table = document.createElement('table');
+    const head = table.insertRow();
+    for (const h of ['Field', 'Current', 'Proposed']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      head.appendChild(th);
+    }
+    for (const [label, value] of proposed) {
+      const tr = table.insertRow();
+      const f = tr.insertCell(); f.className = 'field'; f.textContent = label;
+      const o = tr.insertCell(); o.className = 'old'; o.textContent = currentShop ? (before.get(label) ?? '—') : '—';
+      const n = tr.insertCell(); n.className = 'new'; n.textContent = value;
+    }
+    return table;
+  }
+
+  async function render() {
+    const cards = document.getElementById('cards');
+    cards.replaceChildren();
+    const subs = await fetch('/api/submissions?status=' + current).then(r => r.json());
+    if (subs.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No ' + current + ' submissions.';
+      cards.appendChild(empty);
+      return;
+    }
+    for (const sub of subs) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const head = document.createElement('div');
+      head.className = 'card-head';
+      const kind = document.createElement('span');
+      kind.className = 'kind ' + sub.kind;
+      kind.textContent = sub.kind;
+      head.appendChild(kind);
+
+      let currentShop = null;
+      if (sub.kind === 'update') {
+        currentShop = await fetch('/api/shops/' + sub.shop_id).then(r => r.ok ? r.json() : null);
+        const link = document.createElement('a');
+        link.href = '/shop.html?id=' + sub.shop_id;
+        link.textContent = currentShop ? currentShop.name : 'shop #' + sub.shop_id;
+        head.appendChild(link);
+      } else {
+        const name = document.createElement('span');
+        name.style.fontWeight = '600';
+        name.textContent = sub.payload.name || 'new shop';
+        head.appendChild(name);
+      }
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = '#' + sub.id + ' · ' + sub.submitted_by + ' · ' + new Date(sub.created_at).toLocaleString()
+        + (sub.reviewed_by ? ' · reviewed by ' + sub.reviewed_by : '');
+      head.appendChild(meta);
+      card.append(head, diffTable(sub.payload, currentShop));
+
+      if (sub.status === 'pending') {
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const note = document.createElement('span');
+        note.className = 'note';
+        for (const [cls, label] of [['approve', 'Approve'], ['reject', 'Reject']]) {
+          const b = document.createElement('button');
+          b.className = cls;
+          b.textContent = label;
+          b.addEventListener('click', async () => {
+            const resp = await fetch(`/api/submissions/${sub.id}/${cls}`, { method: 'POST' });
+            if (resp.ok) {
+              render();
+            } else {
+              const out = await resp.json().catch(() => ({}));
+              note.textContent = out.error || 'failed';
+            }
+          });
+          actions.appendChild(b);
+        }
+        actions.appendChild(note);
+        card.appendChild(actions);
+      }
+      cards.appendChild(card);
+    }
+  }
+
+  async function renderAdmins() {
+    const table = document.getElementById('admins');
+    table.replaceChildren();
+    const users = await fetch('/api/users').then(r => r.json());
+    for (const u of users) {
+      const tr = table.insertRow();
+      tr.insertCell().textContent = u.email;
+      const src = tr.insertCell();
+      src.className = 'source';
+      src.textContent = u.source === 'config' ? 'server config' : 'granted ' + new Date(u.created_at).toLocaleDateString();
+      const act = tr.insertCell();
+      if (u.source === 'database') {
+        const b = document.createElement('button');
+        b.className = 'revoke';
+        b.textContent = 'Revoke';
+        b.addEventListener('click', async () => {
+          if (!confirm('Revoke admin for ' + u.email + '?')) return;
+          const resp = await fetch('/api/users/' + encodeURIComponent(u.email), { method: 'DELETE' });
+          if (resp.ok) renderAdmins();
+        });
+        act.appendChild(b);
+      }
+    }
+  }
+
+  document.getElementById('grant').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = document.getElementById('grant-email').value.trim();
+    const note = document.getElementById('grant-note');
+    const resp = await fetch('/api/users/' + encodeURIComponent(email), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin' }),
+    });
+    if (resp.ok) {
+      note.textContent = '';
+      document.getElementById('grant-email').value = '';
+      renderAdmins();
+    } else {
+      const out = await resp.json().catch(() => ({}));
+      note.textContent = out.error || 'failed';
+    }
+  });
+
+  fetch('/api/me').then(r => r.ok ? r.json() : null).then(me => {
+    const guard = document.getElementById('guard');
+    if (!me) {
+      guard.replaceChildren('Sign in as an admin to review submissions: ');
+      fetch('/api/auth/providers').then(r => r.json()).then(names => {
+        if (!names.length) { guard.append('(no login configured)'); return; }
+        for (const n of names) {
+          const a = document.createElement('a');
+          a.href = '/auth/' + n + '/login';
+          a.textContent = n === 'dev' ? 'Dev account' : n[0].toUpperCase() + n.slice(1);
+          guard.appendChild(a);
+        }
+      }).catch(() => {});
+      return;
+    }
+    if (!me.admin) {
+      guard.textContent = 'Signed in as ' + me.email + ', but admin access is required.';
+      return;
+    }
+    guard.hidden = true;
+    document.getElementById('panel').hidden = false;
+    render();
+    renderAdmins();
+  });
+
+  document.getElementById('tabs').addEventListener('click', e => {
+    if (e.target.dataset.status) {
+      current = e.target.dataset.status;
+      for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b === e.target);
+      render();
+    }
+  });
+</script>
+</body>
+</html>

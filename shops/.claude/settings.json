@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go *)",
+      "Bash(gofmt *)",
+      "Read(//Users/ireydiak/Dev/git/find-my-bike/**)"
+    ]
+  }
+}

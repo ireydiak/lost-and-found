@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shop details</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; }
+  header {
+    position: sticky; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    padding: 12px 16px; display: flex; gap: 14px; align-items: center;
+  }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  nav a { color: #1565c0; text-decoration: none; font-size: 14px; margin-right: 10px; }
+  nav a:hover { text-decoration: underline; }
+  main { max-width: 720px; margin: 16px auto; padding: 0 12px 40px; }
+  section { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .title-row h2 { margin: 0; font-size: 22px; }
+  .badge { font-size: 12px; padding: 2px 10px; border-radius: 10px; color: #fff; text-transform: capitalize; }
+  .addr { color: #555; margin-top: 6px; }
+  #map { height: 260px; border-radius: 8px; margin-top: 12px; }
+  dl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0; font-size: 14px; }
+  dt { color: #888; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  dd a { color: #1565c0; }
+  h3 { margin: 0 0 10px; font-size: 16px; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  form label { font-size: 13px; color: #555; display: flex; flex-direction: column; gap: 4px; }
+  form input, form select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+  .full { grid-column: 1 / -1; }
+  button {
+    grid-column: 1 / -1; justify-self: start; background: #1565c0; color: #fff; border: none;
+    border-radius: 6px; padding: 9px 18px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #0d47a1; }
+  #form-note { grid-column: 1 / -1; font-size: 14px; }
+  .ok { color: #2e7d32; } .err { color: #c62828; }
+  .signin a { display: inline-block; margin-right: 12px; color: #1565c0; }
+  .muted { color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bike shops of Montreal</h1>
+  <nav><a href="/shops.html">‹ All shops</a><a href="/">Map view</a></nav>
+</header>
+<main>
+  <section id="summary"><div class="muted">Loading…</div></section>
+  <section id="contacts" hidden>
+    <h3>Contact</h3>
+    <dl id="contact-list"></dl>
+  </section>
+  <section id="suggest">
+    <h3 id="suggest-title">Suggest an update</h3>
+    <div id="suggest-body" class="muted">Loading…</div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const shopID = Number(params.get('id'));
+  const colors = { active: '#2e7d32', inactive: '#f9a825', closed: '#757575' };
+  const fields = ['name', 'status', 'phone', 'email', 'website', 'instagram_url', 'facebook_url'];
+  const addressFields = ['street_number', 'street_name', 'city', 'borough', 'postal_code'];
+  let shop = null;
+
+  function formatAddress(a) {
+    if (!a) return 'no address on file';
+    return [`${a.street_number} ${a.street_name}`, a.borough, a.city, a.postal_code].filter(Boolean).join(', ');
+  }
+
+  function renderSummary() {
+    const el = document.getElementById('summary');
+    el.replaceChildren();
+    const row = document.createElement('div');
+    row.className = 'title-row';
+    const h2 = document.createElement('h2');
+    h2.textContent = shop.name;
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = shop.status;
+    badge.style.background = colors[shop.status] || '#1565c0';
+    row.append(h2, badge);
+    const addr = document.createElement('div');
+    addr.className = 'addr';
+    addr.textContent = formatAddress(shop.address);
+    el.append(row, addr);
+
+    if (shop.location) {
+      const mapDiv = document.createElement('div');
+      mapDiv.id = 'map';
+      el.appendChild(mapDiv);
+      const map = L.map('map', { scrollWheelZoom: false }).setView([shop.location.lat, shop.location.lon], 15);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+      L.circleMarker([shop.location.lat, shop.location.lon], {
+        radius: 8, weight: 2, color: '#fff', fillColor: colors[shop.status] || '#1565c0', fillOpacity: 0.95,
+      }).addTo(map);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'muted';
+      none.textContent = 'This shop has no location on the map yet.';
+      el.appendChild(none);
+    }
+  }
+
+  function renderContacts() {
+    const entries = [
+      ['Phone', shop.phone, v => 'tel:' + v],
+      ['Email', shop.email, v => 'mailto:' + v],
+      ['Website', shop.website, v => v],
+      ['Instagram', shop.instagram_url, v => v],
+      ['Facebook', shop.facebook_url, v => v],
+    ].filter(([, v]) => v);
+    if (entries.length === 0) return;
+    const dl = document.getElementById('contact-list');
+    for (const [label, value, href] of entries) {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      const a = document.createElement('a');
+      a.href = href(value);
+      a.textContent = value;
+      a.rel = 'noopener';
+      if (!a.href.startsWith('tel:') && !a.href.startsWith('mailto:')) a.target = '_blank';
+      dd.appendChild(a);
+      dl.append(dt, dd);
+    }
+    document.getElementById('contacts').hidden = false;
+  }
+
+  function inputFor(name, label, value, full) {
+    const wrap = document.createElement('label');
+    if (full) wrap.className = 'full';
+    wrap.append(label);
+    let input;
+    if (name === 'status') {
+      input = document.createElement('select');
+      for (const s of ['active', 'inactive', 'closed']) {
+        const o = document.createElement('option');
+        o.value = o.textContent = s;
+        input.appendChild(o);
+      }
+    } else {
+      input = document.createElement('input');
+    }
+    input.name = name;
+    input.value = value || '';
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  function renderForm(me) {
+    const body = document.getElementById('suggest-body');
+    body.replaceChildren();
+    body.className = '';
+    if (!me) {
+      body.className = 'signin';
+      body.append('Sign in to suggest changes to this shop: ');
+      fetch('/api/auth/providers').then(r => r.json()).then(names => {
+        if (!names.length) { body.append('(no login configured)'); return; }
+        for (const n of names) {
+          const a = document.createElement('a');
+          a.href = '/auth/' + n + '/login';
+          a.textContent = n === 'dev' ? 'Dev account' : n[0].toUpperCase() + n.slice(1);
+          body.appendChild(a);
+        }
+      }).catch(() => {});
+      return;
+    }
+
+    const form = document.createElement('form');
+    form.append(
+      inputFor('name', 'Name', shop.name),
+      inputFor('status', 'Status', shop.status),
+      inputFor('phone', 'Phone', shop.phone),
+      inputFor('email', 'Email', shop.email),
+      inputFor('website', 'Website', shop.website),
+      inputFor('instagram_url', 'Instagram URL', shop.instagram_url),
+      inputFor('facebook_url', 'Facebook URL', shop.facebook_url),
+    );
+    const a = shop.address || {};
+    form.append(
+      inputFor('street_number', 'Street number', a.street_number),
+      inputFor('street_name', 'Street name', a.street_name),
+      inputFor('city', 'City', a.city),
+      inputFor('borough', 'Borough', a.borough),
+      inputFor('postal_code', 'Postal code', a.postal_code),
+    );
+    const isAdmin = me.admin;
+    if (isAdmin) {
+      document.getElementById('suggest-title').textContent = 'Edit shop (admin)';
+      const loc = shop.location || {};
+      form.append(
+        inputFor('lat', 'Latitude', loc.lat !== undefined ? String(loc.lat) : ''),
+        inputFor('lon', 'Longitude', loc.lon !== undefined ? String(loc.lon) : ''),
+      );
+    }
+    const submit = document.createElement('button');
+    submit.textContent = isAdmin ? 'Save changes' : 'Submit for review';
+    const note = document.createElement('div');
+    note.id = 'form-note';
+    form.append(submit, note);
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const payload = {};
+      for (const f of fields) {
+        const v = data.get(f).trim();
+        if (v !== (shop[f] || '')) payload[f] = v;
+      }
+      const addrChanges = {};
+      for (const f of addressFields) {
+        const v = data.get(f).trim();
+        if (v !== ((shop.address && shop.address[f]) || '')) addrChanges[f] = v;
+      }
+      if (Object.keys(addrChanges).length > 0) payload.address = addrChanges;
+      if (isAdmin) {
+        const lat = data.get('lat').trim(), lon = data.get('lon').trim();
+        const before = shop.location ? [String(shop.location.lat), String(shop.location.lon)] : ['', ''];
+        if (lat !== before[0] || lon !== before[1]) {
+          if (!lat || !lon || isNaN(Number(lat)) || isNaN(Number(lon))) {
+            note.textContent = 'Latitude and longitude must both be numbers.';
+            note.className = 'err';
+            return;
+          }
+          payload.location = { lat: Number(lat), lon: Number(lon) };
+        }
+      }
+      if (Object.keys(payload).length === 0) {
+        note.textContent = 'Nothing changed.';
+        note.className = '';
+        return;
+      }
+
+      const [url, method] = isAdmin
+        ? ['/api/shops/' + shopID, 'PATCH']
+        : ['/api/submissions', 'POST'];
+      if (!isAdmin) payload.shop_id = shopID;
+      const resp = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const out = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        note.textContent = out.error || 'Something went wrong.';
+        note.className = 'err';
+        return;
+      }
+      if (isAdmin) {
+        shop = out;
+        note.textContent = 'Saved.';
+        note.className = 'ok';
+        renderSummary();
+      } else {
+        note.textContent = 'Thanks! Your suggestion is pending review.';
+        note.className = 'ok';
+        form.querySelectorAll('input,select,button').forEach(el => el.disabled = true);
+      }
+    });
+    body.appendChild(form);
+  }
+
+  if (!shopID) {
+    document.getElementById('summary').textContent = 'Missing shop id.';
+  } else {
+    Promise.all([
+      fetch('/api/shops/' + shopID).then(r => { if (!r.ok) throw new Error('not found'); return r.json(); }),
+      fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([shopData, me]) => {
+      shop = shopData;
+      document.title = shop.name + ' — bike shops of Montreal';
+      if (me && me.admin) {
+        const a = document.createElement('a');
+        a.href = '/admin.html';
+        a.textContent = 'Admin';
+        document.querySelector('nav').appendChild(a);
+      }
+      renderSummary();
+      renderContacts();
+      renderForm(me);
+    }).catch(() => {
+      document.getElementById('summary').textContent = 'Shop not found.';
+      document.getElementById('suggest').hidden = true;
+    });
+  }
+</script>
+</body>
+</html>

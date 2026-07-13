@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bike shops of Montreal</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+  #map { height: 100%; }
+  #bar {
+    position: absolute; top: 10px; left: 54px; z-index: 1000;
+    background: #fff; border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.3);
+    padding: 8px 12px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  }
+  #search { border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; width: 200px; font-size: 14px; }
+  #bar label { font-size: 14px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #count { font-size: 13px; color: #666; }
+  #listlink, #bar > a { font-size: 14px; color: #1565c0; text-decoration: none; }
+  #listlink:hover, #bar > a:hover { text-decoration: underline; }
+  #account { font-size: 13px; border-left: 1px solid #ddd; padding-left: 14px; display: flex; gap: 8px; align-items: center; }
+  #account a, #account button { color: #1565c0; background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: none; }
+  #account a:hover, #account button:hover { text-decoration: underline; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .popup-name { font-weight: 600; margin-bottom: 2px; }
+  .popup-status { font-size: 12px; text-transform: capitalize; color: #666; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <a id="listlink" href="/shops.html">List view</a>
+  <a href="/suggest.html">Suggest a shop</a>
+  <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
+  <label><span class="dot" style="background:#2e7d32"></span><input type="checkbox" id="active" checked> Active</label>
+  <label><span class="dot" style="background:#757575"></span><input type="checkbox" id="closed" checked> Closed</label>
+  <span id="count"></span>
+  <span id="account"></span>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+  const map = L.map('map').setView([45.53, -73.65], 11);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, geocoding by <a href="https://nominatim.org">Nominatim</a>',
+  }).addTo(map);
+
+  const cluster = L.markerClusterGroup({ maxClusterRadius: 40 });
+  map.addLayer(cluster);
+
+  const colors = { active: '#2e7d32', closed: '#757575' };
+  // fold accents and case so "velo" finds "Vélo"
+  const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  let shops = [];
+
+  function makeMarker(f) {
+    const [lon, lat] = f.geometry.coordinates;
+    const p = f.properties;
+    const m = L.circleMarker([lat, lon], {
+      radius: 7, weight: 1.5, color: '#fff',
+      fillColor: colors[p.status] || '#1565c0', fillOpacity: 0.95,
+    });
+    const div = document.createElement('div');
+    for (const [cls, text] of [['popup-name', p.name], ['popup-addr', p.address], ['popup-status', p.status]]) {
+      const el = document.createElement('div');
+      el.className = cls;
+      el.textContent = text;
+      div.appendChild(el);
+    }
+    const details = document.createElement('a');
+    details.href = '/shop.html?id=' + p.id;
+    details.textContent = 'Details ›';
+    div.appendChild(details);
+    m.bindPopup(div);
+    return m;
+  }
+
+  function refresh() {
+    const q = fold(document.getElementById('search').value.trim());
+    const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked };
+    const visible = shops.filter(s => show[s.status] && (q === '' || s.searchName.includes(q)));
+    cluster.clearLayers();
+    cluster.addLayers(visible.map(s => s.marker));
+    document.getElementById('count').textContent = `${visible.length} / ${shops.length} shops`;
+  }
+
+  fetch('/api/shops')
+    .then(r => r.json())
+    .then(fc => {
+      shops = fc.features.map(f => ({
+        status: f.properties.status,
+        searchName: fold(f.properties.name),
+        marker: makeMarker(f),
+      }));
+      refresh();
+    })
+    .catch(err => { document.getElementById('count').textContent = 'failed to load shops'; console.error(err); });
+
+  function signinLinks(el) {
+    fetch('/api/auth/providers').then(r => r.json()).then(names => {
+      if (!names.length) { el.append('no login configured'); return; }
+      names.forEach((n, i) => {
+        const a = document.createElement('a');
+        a.href = '/auth/' + n + '/login';
+        a.textContent = (i === 0 ? 'Sign in with ' : '') + (n === 'dev' ? 'Dev account' : n[0].toUpperCase() + n.slice(1));
+        el.appendChild(a);
+      });
+    }).catch(() => {});
+  }
+
+  fetch('/api/me').then(r => {
+    const el = document.getElementById('account');
+    if (!r.ok) {
+      signinLinks(el);
+      return;
+    }
+    r.json().then(me => {
+      if (me.admin) {
+        const admin = document.createElement('a');
+        admin.href = '/admin.html';
+        admin.textContent = 'Admin';
+        document.getElementById('listlink').after(admin);
+      }
+      const who = document.createElement('span');
+      who.textContent = me.email + (me.admin ? ' (admin)' : '');
+      const out = document.createElement('button');
+      out.textContent = 'Sign out';
+      out.addEventListener('click', () =>
+        fetch('/auth/logout', { method: 'POST' }).then(() => location.reload()));
+      el.replaceChildren(who, out);
+    });
+  }).catch(() => {});
+
+  document.getElementById('search').addEventListener('input', refresh);
+  document.getElementById('active').addEventListener('change', refresh);
+  document.getElementById('closed').addEventListener('change', refresh);
+</script>
+</body>
+</html>

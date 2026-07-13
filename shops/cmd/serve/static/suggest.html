@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suggest a shop — bike shops of Montreal</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; }
+  header {
+    position: sticky; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    padding: 12px 16px; display: flex; gap: 14px; align-items: center; z-index: 1001;
+  }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  nav a { color: #1565c0; text-decoration: none; font-size: 14px; margin-right: 10px; }
+  nav a:hover { text-decoration: underline; }
+  main { max-width: 720px; margin: 16px auto; padding: 0 12px 40px; }
+  section { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  h3 { margin: 0 0 6px; font-size: 16px; }
+  .intro { color: #666; font-size: 14px; margin: 0 0 14px; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  form label { font-size: 13px; color: #555; display: flex; flex-direction: column; gap: 4px; }
+  form input, form select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+  .full { grid-column: 1 / -1; }
+  #picker { height: 260px; border-radius: 8px; }
+  .picker-hint { font-size: 13px; color: #666; display: flex; gap: 10px; align-items: center; }
+  .picker-hint button { background: none; border: none; color: #1565c0; cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
+  button.submit {
+    grid-column: 1 / -1; justify-self: start; background: #1565c0; color: #fff; border: none;
+    border-radius: 6px; padding: 9px 18px; font: inherit; cursor: pointer;
+  }
+  button.submit:hover { background: #0d47a1; }
+  #note { grid-column: 1 / -1; font-size: 14px; }
+  .ok { color: #2e7d32; } .err { color: #c62828; }
+  .signin a { display: inline-block; margin-right: 12px; color: #1565c0; }
+  .muted { color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bike shops of Montreal</h1>
+  <nav><a href="/shops.html">All shops</a><a href="/">Map view</a></nav>
+</header>
+<main>
+  <section>
+    <h3>Suggest a new bike shop</h3>
+    <p class="intro">Know a shop that's missing from the map? Fill in what you know — an admin reviews every suggestion before it appears.</p>
+    <div id="body" class="muted">Loading…</div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const contactFields = [
+    ['phone', 'Phone'], ['email', 'Email'], ['website', 'Website'],
+    ['instagram_url', 'Instagram URL'], ['facebook_url', 'Facebook URL'],
+  ];
+  let pin = null; // {lat, lon} once the map is clicked
+
+  function input(name, label, opts = {}) {
+    const wrap = document.createElement('label');
+    if (opts.full) wrap.className = 'full';
+    wrap.append(label + (opts.required ? ' *' : ''));
+    const el = document.createElement('input');
+    el.name = name;
+    if (opts.required) el.required = true;
+    if (opts.value) el.value = opts.value;
+    wrap.appendChild(el);
+    return wrap;
+  }
+
+  function buildForm(body) {
+    const form = document.createElement('form');
+    form.append(input('name', 'Shop name', { required: true, full: true }));
+    for (const [name, label] of contactFields) form.append(input(name, label));
+    form.append(
+      input('street_number', 'Street number', { required: true }),
+      input('street_name', 'Street name', { required: true }),
+      input('city', 'City', { required: true, value: 'Montréal' }),
+      input('borough', 'Borough'),
+      input('postal_code', 'Postal code', { required: true }),
+    );
+
+    const pickerWrap = document.createElement('div');
+    pickerWrap.className = 'full';
+    const hint = document.createElement('div');
+    hint.className = 'picker-hint';
+    const hintText = document.createElement('span');
+    hintText.textContent = 'Optional: click the map to place the shop exactly. Without a pin, the address is located automatically.';
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.textContent = 'Clear pin';
+    clear.hidden = true;
+    hint.append(hintText, clear);
+    const mapDiv = document.createElement('div');
+    mapDiv.id = 'picker';
+    pickerWrap.append(mapDiv, hint);
+    form.appendChild(pickerWrap);
+
+    const submit = document.createElement('button');
+    submit.className = 'submit';
+    submit.textContent = 'Submit for review';
+    const note = document.createElement('div');
+    note.id = 'note';
+    form.append(submit, note);
+    body.appendChild(form);
+
+    // map picker
+    const map = L.map('picker').setView([45.53, -73.65], 11);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    let marker = null;
+    const setPin = (lat, lon) => {
+      pin = { lat, lon };
+      if (!marker) {
+        marker = L.marker([lat, lon], { draggable: true }).addTo(map);
+        marker.on('dragend', () => {
+          const p = marker.getLatLng();
+          pin = { lat: p.lat, lon: p.lng };
+        });
+      } else {
+        marker.setLatLng([lat, lon]);
+      }
+      clear.hidden = false;
+    };
+    map.on('click', e => setPin(e.latlng.lat, e.latlng.lng));
+    clear.addEventListener('click', () => {
+      if (marker) { map.removeLayer(marker); marker = null; }
+      pin = null;
+      clear.hidden = true;
+    });
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const val = n => data.get(n).trim();
+      const payload = {
+        name: val('name'),
+        address: {
+          street_number: val('street_number'),
+          street_name: val('street_name'),
+          city: val('city'),
+          postal_code: val('postal_code'),
+        },
+      };
+      if (val('borough')) payload.address.borough = val('borough');
+      for (const [name] of contactFields) {
+        if (val(name)) payload[name] = val(name);
+      }
+      if (pin) payload.location = pin;
+
+      const resp = await fetch('/api/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const out = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        note.textContent = 'Thanks! Your suggestion is pending review — it will appear on the map once approved.';
+        note.className = 'ok';
+        form.querySelectorAll('input,select,button').forEach(el => el.disabled = true);
+      } else {
+        note.textContent = out.error || 'Something went wrong.';
+        note.className = 'err';
+      }
+    });
+  }
+
+  const body = document.getElementById('body');
+  fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null).then(me => {
+    body.replaceChildren();
+    body.className = '';
+    if (!me) {
+      body.className = 'signin';
+      body.append('Sign in to suggest a shop: ');
+      fetch('/api/auth/providers').then(r => r.json()).then(names => {
+        if (!names.length) { body.append('(no login configured)'); return; }
+        for (const n of names) {
+          const a = document.createElement('a');
+          a.href = '/auth/' + n + '/login';
+          a.textContent = n === 'dev' ? 'Dev account' : n[0].toUpperCase() + n.slice(1);
+          body.appendChild(a);
+        }
+      }).catch(() => {});
+      return;
+    }
+    buildForm(body);
+  });
+</script>
+</body>
+</html>

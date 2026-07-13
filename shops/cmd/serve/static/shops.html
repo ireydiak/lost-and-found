@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bike shops of Montreal — list</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; }
+  header {
+    position: sticky; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    padding: 12px 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  nav a { color: #1565c0; text-decoration: none; font-size: 14px; }
+  nav a:hover { text-decoration: underline; }
+  #search { border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; width: 220px; font-size: 14px; }
+  header label { font-size: 14px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #count { font-size: 13px; color: #666; }
+  main { max-width: 720px; margin: 16px auto; padding: 0 12px; }
+  a.row {
+    display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 8px; text-decoration: none; color: inherit;
+    box-shadow: 0 1px 2px rgba(0,0,0,.08);
+  }
+  a.row:hover { box-shadow: 0 2px 6px rgba(0,0,0,.18); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .info { flex: 1; min-width: 0; }
+  .name { font-weight: 600; }
+  .addr { font-size: 13px; color: #666; margin-top: 2px; }
+  .chev { color: #bbb; font-size: 18px; }
+  .empty { text-align: center; color: #888; padding: 40px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bike shops of Montreal</h1>
+  <nav><a href="/">Map view</a><a href="/suggest.html">Suggest a shop</a></nav>
+  <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
+  <label><input type="checkbox" id="active" checked> Active</label>
+  <label><input type="checkbox" id="closed" checked> Closed</label>
+  <span id="count"></span>
+</header>
+<main id="list"></main>
+
+<script>
+  const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const colors = { active: '#2e7d32', inactive: '#f9a825', closed: '#757575' };
+  let shops = [];
+
+  function formatAddress(a) {
+    if (!a) return 'no address on file';
+    return [`${a.street_number} ${a.street_name}`, a.city, a.postal_code].filter(Boolean).join(', ');
+  }
+
+  function render() {
+    const q = fold(document.getElementById('search').value.trim());
+    const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked, inactive: true };
+    const visible = shops.filter(s => show[s.status] && (q === '' || fold(s.name).includes(q)));
+
+    const list = document.getElementById('list');
+    list.replaceChildren();
+    for (const s of visible) {
+      const row = document.createElement('a');
+      row.className = 'row';
+      row.href = '/shop.html?id=' + s.id;
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = colors[s.status] || '#1565c0';
+      dot.title = s.status;
+      const info = document.createElement('div');
+      info.className = 'info';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = s.name;
+      const addr = document.createElement('div');
+      addr.className = 'addr';
+      addr.textContent = formatAddress(s.address);
+      info.append(name, addr);
+      const chev = document.createElement('span');
+      chev.className = 'chev';
+      chev.textContent = '›';
+      row.append(dot, info, chev);
+      list.appendChild(row);
+    }
+    if (visible.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No shops match.';
+      list.appendChild(empty);
+    }
+    document.getElementById('count').textContent = `${visible.length} / ${shops.length} shops`;
+  }
+
+  fetch('/api/shops/all')
+    .then(r => r.json())
+    .then(all => { shops = all; render(); })
+    .catch(() => { document.getElementById('count').textContent = 'failed to load shops'; });
+
+  fetch('/api/me').then(r => r.ok ? r.json() : null).then(me => {
+    if (me && me.admin) {
+      const a = document.createElement('a');
+      a.href = '/admin.html';
+      a.textContent = 'Admin';
+      document.querySelector('nav').appendChild(a);
+    }
+  }).catch(() => {});
+
+  document.getElementById('search').addEventListener('input', render);
+  document.getElementById('active').addEventListener('change', render);
+  document.getElementById('closed').addEventListener('change', render);
+</script>
+</body>
+</html>
