@@ -1,16 +1,21 @@
 FROM golang:1.26-alpine AS builder
 
-RUN go install github.com/pressly/goose/v3/cmd/goose@latest
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/serve ./cmd/serve \
+ && CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
-FROM alpine:latest
+FROM alpine:3
 
-RUN apk add --no-cache make
-
-COPY --from=builder /go/bin/goose /usr/local/bin/goose
+# ca-certificates: outbound HTTPS (Nominatim geocoding, OAuth providers)
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
+# migrate reads migration SQL from disk; serve has its assets embedded
+COPY --from=builder /src/db ./db
+COPY --from=builder /out/serve /out/migrate /usr/local/bin/
 
-COPY db/ db/
-COPY Makefile .
-
-CMD ["make", "migrate"]
+EXPOSE 8080
+CMD ["serve"]

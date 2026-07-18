@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: ["migrate"]
     depends_on:
       postgres:
         condition: service_healthy
