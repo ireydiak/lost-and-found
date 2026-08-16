@@ -38,6 +38,10 @@ up:
 test:
 	go test ./...
 
+.PHONY: deploy
+deploy:
+	fly deploy
+
 .PHONY: import-req
 import-req:
 	go run ./cmd/import-req -zip data/JeuDonnees.zip
