@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ireydiak/shops/internal/nominatim"
+	"github.com/lib/pq"
 )
 
 type server struct {
@@ -112,6 +113,7 @@ type shopJSON struct {
 	FacebookURL  *string          `json:"facebook_url"`
 	Address      *addressJSON     `json:"address"`
 	Location     *locationPayload `json:"location"`
+	Tags         []string         `json:"tags"`
 }
 
 type addressJSON struct {
@@ -400,7 +402,7 @@ func (s *server) applyAddress(tx *sql.Tx, addressID sql.NullInt64, a *addressPay
 const shopSelect = `
 	SELECT shop_id, name, status, phone, email, website, instagram_url, facebook_url,
 	       address_id, street_number, street_name, city, borough, postal_code,
-	       ST_X(location::geometry), ST_Y(location::geometry)
+	       ST_X(location::geometry), ST_Y(location::geometry), tags
 	FROM shop_details`
 
 // scanShopJSON reads one shopSelect row.
@@ -417,7 +419,7 @@ func scanShopJSON(scan func(...any) error) (shopJSON, error) {
 	)
 	err := scan(&out.ID, &out.Name, &out.Status, &out.Phone, &out.Email, &out.Website,
 		&out.InstagramURL, &out.FacebookURL,
-		&addrID, &number, &street, &city, &borough, &postal, &lon, &lat)
+		&addrID, &number, &street, &city, &borough, &postal, &lon, &lat, pq.Array(&out.Tags))
 	if err != nil {
 		return out, err
 	}

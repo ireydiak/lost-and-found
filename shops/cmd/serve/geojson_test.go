@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,7 @@ func TestToFeatureCollection(t *testing.T) {
 			Name: "Vélo Oliver inc.", Status: "active",
 			StreetNumber: "153", StreetName: "av. Millhaven", City: "Pointe-Claire", PostalCode: "H9R 3V9",
 			Lon: -73.81, Lat: 45.46,
+			Tags: []string{"bike-shop", "non-profit"},
 		},
 		{
 			Name: "LE BIKE SHOP", Status: "closed",
@@ -34,6 +36,9 @@ func TestToFeatureCollection(t *testing.T) {
 	if got, want := f.Properties.Address, "153 av. Millhaven, Pointe-Claire, H9R 3V9"; got != want {
 		t.Errorf("address = %q, want %q", got, want)
 	}
+	if got, want := f.Properties.Tags, []string{"bike-shop", "non-profit"}; !slices.Equal(got, want) {
+		t.Errorf("tags = %v, want %v", got, want)
+	}
 	// empty city is skipped in the formatted address
 	if got, want := fc.Features[1].Properties.Address, "363 RUE BLEIGNIER, H4N 1B1"; got != want {
 		t.Errorf("address = %q, want %q", got, want)
@@ -44,7 +49,7 @@ func TestToFeatureCollection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"FeatureCollection"`, `"geometry"`, `"coordinates"`, `"properties"`, `"name"`, `"status"`, `"address"`} {
+	for _, key := range []string{`"FeatureCollection"`, `"geometry"`, `"coordinates"`, `"properties"`, `"name"`, `"status"`, `"address"`, `"tags"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("marshaled GeoJSON missing %s: %s", key, b)
 		}

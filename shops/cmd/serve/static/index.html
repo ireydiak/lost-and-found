@@ -16,7 +16,12 @@
     padding: 8px 12px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
   }
   #search { border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; width: 200px; font-size: 14px; }
-  #bar label { font-size: 14px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #filters { display: flex; gap: 6px; }
+  .tag-btn {
+    font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid #ccc; background: #fff; color: #444; border-radius: 999px; padding: 4px 12px;
+  }
+  .tag-btn[aria-pressed="true"] { background: #1565c0; border-color: #1565c0; color: #fff; }
   #count { font-size: 13px; color: #666; }
   #listlink, #bar > a { font-size: 14px; color: #1565c0; text-decoration: none; }
   #listlink:hover, #bar > a:hover { text-decoration: underline; }
@@ -33,8 +38,12 @@
   <a id="listlink" href="/shops.html">List view</a>
   <a href="/suggest.html">Suggest a shop</a>
   <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
-  <label><span class="dot" style="background:#2e7d32"></span><input type="checkbox" id="active" checked> Active</label>
-  <label><span class="dot" style="background:#757575"></span><input type="checkbox" id="closed" checked> Closed</label>
+  <div id="filters" role="group" aria-label="Filters">
+    <button type="button" class="tag-btn" id="active" aria-pressed="true"><span class="dot" style="background:#2e7d32"></span>Open</button>
+    <button type="button" class="tag-btn" id="closed" aria-pressed="false"><span class="dot" style="background:#757575"></span>Closed</button>
+    <button type="button" class="tag-btn" id="for-profit" aria-pressed="true">Shops</button>
+    <button type="button" class="tag-btn" id="non-profit" aria-pressed="false">Community</button>
+  </div>
   <span id="count"></span>
   <span id="account"></span>
 </div>
@@ -80,10 +89,16 @@
     return m;
   }
 
+  const isPressed = id => document.getElementById(id).getAttribute('aria-pressed') === 'true';
+
   function refresh() {
     const q = fold(document.getElementById('search').value.trim());
-    const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked };
-    const visible = shops.filter(s => show[s.status] && (q === '' || s.searchName.includes(q)));
+    const show = { active: isPressed('active'), closed: isPressed('closed') };
+    const showCategory = { forProfit: isPressed('for-profit'), nonProfit: isPressed('non-profit') };
+    const visible = shops.filter(s =>
+      show[s.status] &&
+      (s.nonProfit ? showCategory.nonProfit : showCategory.forProfit) &&
+      (q === '' || s.searchName.includes(q)));
     cluster.clearLayers();
     cluster.addLayers(visible.map(s => s.marker));
     document.getElementById('count').textContent = `${visible.length} / ${shops.length} shops`;
@@ -94,6 +109,7 @@
     .then(fc => {
       shops = fc.features.map(f => ({
         status: f.properties.status,
+        nonProfit: (f.properties.tags || []).includes('non-profit'),
         searchName: fold(f.properties.name),
         marker: makeMarker(f),
       }));
@@ -137,8 +153,13 @@
   }).catch(() => {});
 
   document.getElementById('search').addEventListener('input', refresh);
-  document.getElementById('active').addEventListener('change', refresh);
-  document.getElementById('closed').addEventListener('change', refresh);
+  for (const id of ['active', 'closed', 'for-profit', 'non-profit']) {
+    document.getElementById(id).addEventListener('click', () => {
+      const btn = document.getElementById(id);
+      btn.setAttribute('aria-pressed', String(!isPressed(id)));
+      refresh();
+    });
+  }
 </script>
 </body>
 </html>

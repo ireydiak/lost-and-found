@@ -14,7 +14,12 @@
   nav a { color: #1565c0; text-decoration: none; font-size: 14px; }
   nav a:hover { text-decoration: underline; }
   #search { border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; width: 220px; font-size: 14px; }
-  header label { font-size: 14px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #filters { display: flex; gap: 6px; }
+  .tag-btn {
+    font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid #ccc; background: #fff; color: #444; border-radius: 999px; padding: 4px 12px;
+  }
+  .tag-btn[aria-pressed="true"] { background: #1565c0; border-color: #1565c0; color: #fff; }
   #count { font-size: 13px; color: #666; }
   main { max-width: 720px; margin: 16px auto; padding: 0 12px; }
   a.row {
@@ -36,8 +41,12 @@
   <h1>Bike shops of Montreal</h1>
   <nav><a href="/">Map view</a><a href="/suggest.html">Suggest a shop</a></nav>
   <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
-  <label><input type="checkbox" id="active" checked> Active</label>
-  <label><input type="checkbox" id="closed" checked> Closed</label>
+  <div id="filters" role="group" aria-label="Filters">
+    <button type="button" class="tag-btn" id="active" aria-pressed="true">Open</button>
+    <button type="button" class="tag-btn" id="closed" aria-pressed="false">Closed</button>
+    <button type="button" class="tag-btn" id="for-profit" aria-pressed="true">Shops</button>
+    <button type="button" class="tag-btn" id="non-profit" aria-pressed="false">Community</button>
+  </div>
   <span id="count"></span>
 </header>
 <main id="list"></main>
@@ -52,10 +61,16 @@
     return [`${a.street_number} ${a.street_name}`, a.city, a.postal_code].filter(Boolean).join(', ');
   }
 
+  const isPressed = id => document.getElementById(id).getAttribute('aria-pressed') === 'true';
+
   function render() {
     const q = fold(document.getElementById('search').value.trim());
-    const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked, inactive: true };
-    const visible = shops.filter(s => show[s.status] && (q === '' || fold(s.name).includes(q)));
+    const show = { active: isPressed('active'), closed: isPressed('closed'), inactive: true };
+    const showCategory = { forProfit: isPressed('for-profit'), nonProfit: isPressed('non-profit') };
+    const visible = shops.filter(s =>
+      show[s.status] &&
+      ((s.tags || []).includes('non-profit') ? showCategory.nonProfit : showCategory.forProfit) &&
+      (q === '' || fold(s.name).includes(q)));
 
     const list = document.getElementById('list');
     list.replaceChildren();
@@ -106,8 +121,13 @@
   }).catch(() => {});
 
   document.getElementById('search').addEventListener('input', render);
-  document.getElementById('active').addEventListener('change', render);
-  document.getElementById('closed').addEventListener('change', render);
+  for (const id of ['active', 'closed', 'for-profit', 'non-profit']) {
+    document.getElementById(id).addEventListener('click', () => {
+      const btn = document.getElementById(id);
+      btn.setAttribute('aria-pressed', String(!isPressed(id)));
+      render();
+    });
+  }
 </script>
 </body>
 </html>

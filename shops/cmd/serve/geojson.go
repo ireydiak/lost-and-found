@@ -12,6 +12,7 @@ type shopRow struct {
 	City         string
 	PostalCode   string
 	Lon, Lat     float64
+	Tags         []string
 }
 
 type featureCollection struct {
@@ -31,10 +32,11 @@ type geometry struct {
 }
 
 type props struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Address string `json:"address"`
+	ID      int64    `json:"id"`
+	Name    string   `json:"name"`
+	Status  string   `json:"status"`
+	Address string   `json:"address"`
+	Tags    []string `json:"tags"`
 }
 
 func toFeatureCollection(rows []shopRow) featureCollection {
@@ -53,6 +55,7 @@ func toFeatureCollection(rows []shopRow) featureCollection {
 				Name:    r.Name,
 				Status:  r.Status,
 				Address: strings.Join(parts, ", "),
+				Tags:    r.Tags,
 			},
 		})
 	}

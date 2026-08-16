@@ -11,7 +11,7 @@ import (
 
 	"github.com/ireydiak/shops/internal/auth"
 	"github.com/ireydiak/shops/internal/nominatim"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 //go:embed static
@@ -92,7 +92,7 @@ func main() {
 func loadShops(db *sql.DB) ([]shopRow, error) {
 	rows, err := db.Query(
 		`SELECT shop_id, name, status, street_number, street_name, city, postal_code,
-		        ST_X(location::geometry), ST_Y(location::geometry)
+		        ST_X(location::geometry), ST_Y(location::geometry), tags
 		 FROM shop_details
 		 WHERE location IS NOT NULL
 		 ORDER BY name`)
@@ -104,7 +104,7 @@ func loadShops(db *sql.DB) ([]shopRow, error) {
 	var shops []shopRow
 	for rows.Next() {
 		var r shopRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.Status, &r.StreetNumber, &r.StreetName, &r.City, &r.PostalCode, &r.Lon, &r.Lat); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Status, &r.StreetNumber, &r.StreetName, &r.City, &r.PostalCode, &r.Lon, &r.Lat, pq.Array(&r.Tags)); err != nil {
 			return nil, err
 		}
 		shops = append(shops, r)
