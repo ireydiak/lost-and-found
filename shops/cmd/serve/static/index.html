@@ -35,6 +35,8 @@
   <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
   <label><span class="dot" style="background:#2e7d32"></span><input type="checkbox" id="active" checked> Active</label>
   <label><span class="dot" style="background:#757575"></span><input type="checkbox" id="closed" checked> Closed</label>
+  <label><input type="checkbox" id="for-profit" checked> For-profit</label>
+  <label><input type="checkbox" id="non-profit" checked> Non-profit</label>
   <span id="count"></span>
   <span id="account"></span>
 </div>
@@ -83,7 +85,11 @@
   function refresh() {
     const q = fold(document.getElementById('search').value.trim());
     const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked };
-    const visible = shops.filter(s => show[s.status] && (q === '' || s.searchName.includes(q)));
+    const showCategory = { forProfit: document.getElementById('for-profit').checked, nonProfit: document.getElementById('non-profit').checked };
+    const visible = shops.filter(s =>
+      show[s.status] &&
+      (s.nonProfit ? showCategory.nonProfit : showCategory.forProfit) &&
+      (q === '' || s.searchName.includes(q)));
     cluster.clearLayers();
     cluster.addLayers(visible.map(s => s.marker));
     document.getElementById('count').textContent = `${visible.length} / ${shops.length} shops`;
@@ -94,6 +100,7 @@
     .then(fc => {
       shops = fc.features.map(f => ({
         status: f.properties.status,
+        nonProfit: (f.properties.tags || []).includes('non-profit'),
         searchName: fold(f.properties.name),
         marker: makeMarker(f),
       }));
@@ -139,6 +146,8 @@
   document.getElementById('search').addEventListener('input', refresh);
   document.getElementById('active').addEventListener('change', refresh);
   document.getElementById('closed').addEventListener('change', refresh);
+  document.getElementById('for-profit').addEventListener('change', refresh);
+  document.getElementById('non-profit').addEventListener('change', refresh);
 </script>
 </body>
 </html>

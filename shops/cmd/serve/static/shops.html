@@ -38,6 +38,8 @@
   <input id="search" type="search" placeholder="Search shops…" autocomplete="off">
   <label><input type="checkbox" id="active" checked> Active</label>
   <label><input type="checkbox" id="closed" checked> Closed</label>
+  <label><input type="checkbox" id="for-profit" checked> For-profit</label>
+  <label><input type="checkbox" id="non-profit" checked> Non-profit</label>
   <span id="count"></span>
 </header>
 <main id="list"></main>
@@ -55,7 +57,11 @@
   function render() {
     const q = fold(document.getElementById('search').value.trim());
     const show = { active: document.getElementById('active').checked, closed: document.getElementById('closed').checked, inactive: true };
-    const visible = shops.filter(s => show[s.status] && (q === '' || fold(s.name).includes(q)));
+    const showCategory = { forProfit: document.getElementById('for-profit').checked, nonProfit: document.getElementById('non-profit').checked };
+    const visible = shops.filter(s =>
+      show[s.status] &&
+      ((s.tags || []).includes('non-profit') ? showCategory.nonProfit : showCategory.forProfit) &&
+      (q === '' || fold(s.name).includes(q)));
 
     const list = document.getElementById('list');
     list.replaceChildren();
@@ -108,6 +114,8 @@
   document.getElementById('search').addEventListener('input', render);
   document.getElementById('active').addEventListener('change', render);
   document.getElementById('closed').addEventListener('change', render);
+  document.getElementById('for-profit').addEventListener('change', render);
+  document.getElementById('non-profit').addEventListener('change', render);
 </script>
 </body>
 </html>
