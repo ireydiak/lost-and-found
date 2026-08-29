@@ -60,6 +60,7 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /api/shops/all", s.listAllShops)
+	mux.HandleFunc("GET /api/shops/export.csv", s.exportShopsCSV)
 	mux.HandleFunc("GET /api/shops/{id}", s.getShop)
 
 	// auth
