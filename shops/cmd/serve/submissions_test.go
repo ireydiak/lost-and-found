@@ -103,7 +103,6 @@ func TestSubmissionFlowIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		for _, q := range []string{
 			`DELETE FROM shops WHERE name = 'Integration Vélo'`,
-			`DELETE FROM addresses WHERE address_id NOT IN (SELECT address_id FROM shops WHERE address_id IS NOT NULL)`,
 			`DELETE FROM submissions WHERE submitted_by LIKE '%@test.local'`,
 		} {
 			if _, err := db.Exec(q); err != nil {
@@ -134,22 +133,21 @@ func TestSubmissionFlowIntegration(t *testing.T) {
 	// the shop now exists with the proposed location
 	var count int
 	err = db.QueryRow(
-		`SELECT count(*) FROM shops s JOIN addresses a USING (address_id)
-		 WHERE s.name = 'Integration Vélo' AND a.location IS NOT NULL`).Scan(&count)
+		`SELECT count(*) FROM shops WHERE name = 'Integration Vélo' AND location IS NOT NULL`).Scan(&count)
 	if err != nil || count != 1 {
 		t.Fatalf("approved shop rows = %d (err %v), want 1", count, err)
 	}
 
-	// its socials landed as rows, and the view pivots them back
+	// its socials landed on the shop row
 	var website, instagram sql.NullString
 	err = db.QueryRow(
-		`SELECT website, instagram_url FROM shop_details WHERE name = 'Integration Vélo'`,
+		`SELECT website, instagram_url FROM shops WHERE name = 'Integration Vélo'`,
 	).Scan(&website, &instagram)
 	if err != nil {
-		t.Fatalf("shop_details view: %v", err)
+		t.Fatalf("shops socials: %v", err)
 	}
 	if website.String != "https://integration.example" || instagram.String != "https://instagram.com/integrationvelo" {
-		t.Errorf("view socials = %q, %q", website.String, instagram.String)
+		t.Errorf("socials = %q, %q", website.String, instagram.String)
 	}
 
 	// approving twice conflicts

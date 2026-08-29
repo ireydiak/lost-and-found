@@ -160,8 +160,8 @@ func (s *server) createShop(w http.ResponseWriter, r *http.Request) {
 	s.respondWithShop(w, http.StatusCreated, shopID)
 }
 
-// insertShop creates the address and shop rows for a validated create
-// payload, geocoding the address when no explicit location is given.
+// insertShop creates the shop row for a validated create payload, geocoding
+// the address when no explicit location is given.
 func (s *server) insertShop(p *shopPayload) (int64, error) {
 	loc := p.Location
 	if loc == nil {
@@ -173,78 +173,64 @@ func (s *server) insertShop(p *shopPayload) (int64, error) {
 		}
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
 	var lat, lon sql.NullFloat64
 	if loc != nil {
 		lat = sql.NullFloat64{Float64: loc.Lat, Valid: true}
 		lon = sql.NullFloat64{Float64: loc.Lon, Valid: true}
 	}
 	addr := p.Address.toNominatim()
-	var addressID int64
-	err = tx.QueryRow(
-		`INSERT INTO addresses (street_number, street_name, city, borough, postal_code, location)
-		 VALUES ($1, $2, $3, NULLIF($4, ''), $5, ST_SetSRID(ST_MakePoint($6, $7), 4326)::geography)
-		 RETURNING address_id`,
-		addr.StreetNumber, addr.StreetName, addr.City, addr.Borough, addr.PostalCode, lon, lat,
-	).Scan(&addressID)
-	if err != nil {
-		return 0, err
-	}
 
 	status := "active"
 	if p.Status != nil {
 		status = *p.Status
 	}
+
 	var shopID int64
-	err = tx.QueryRow(
-		`INSERT INTO shops (name, status, phone, email, address_id)
-		 VALUES ($1, $2::shop_status, $3, $4, $5)
+	err := s.db.QueryRow(
+		`INSERT INTO shops (name, status, phone, email, website, instagram_url, facebook_url,
+		                     street_number, street_name, city, borough, postal_code, location)
+		 VALUES ($1, $2::shop_status, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12,
+		         ST_SetSRID(ST_MakePoint($13, $14), 4326)::geography)
 		 RETURNING shop_id`,
-		strings.TrimSpace(*p.Name), status, p.Phone, p.Email, addressID,
+		strings.TrimSpace(*p.Name), status, p.Phone, p.Email,
+		cleanOrNil(p.Website), cleanOrNil(p.InstagramURL), cleanOrNil(p.FacebookURL),
+		addr.StreetNumber, addr.StreetName, addr.City, addr.Borough, addr.PostalCode,
+		lon, lat,
 	).Scan(&shopID)
-	if err != nil {
-		return 0, err
-	}
-	if err := upsertSocials(tx, shopID, p); err != nil {
-		return 0, err
-	}
-	return shopID, tx.Commit()
+	return shopID, err
 }
 
-// socialPlatforms maps the flat payload fields onto socials table rows.
-var socialPlatforms = []struct {
-	platform string
-	value    func(p *shopPayload) *string
-}{
-	{"website", func(p *shopPayload) *string { return p.Website }},
-	{"instagram", func(p *shopPayload) *string { return p.InstagramURL }},
-	{"facebook", func(p *shopPayload) *string { return p.FacebookURL }},
+// cleanOrNil trims v and returns nil in place of an absent or blank value, so
+// it can be passed straight to a nullable column.
+func cleanOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	if url := strings.TrimSpace(*v); url != "" {
+		return url
+	}
+	return nil
 }
 
-// upsertSocials applies the social link fields present in a payload: a value
-// upserts the platform's row, an empty string removes it, nil leaves it alone.
-func upsertSocials(tx *sql.Tx, shopID int64, p *shopPayload) error {
-	for _, sp := range socialPlatforms {
-		v := sp.value(p)
-		if v == nil {
-			continue
+// applySocials applies the social link fields present in a payload: a value
+// sets the column, an empty string clears it, nil leaves it alone.
+func applySocials(tx *sql.Tx, shopID int64, p *shopPayload) error {
+	if p.Website != nil {
+		if _, err := tx.Exec(`UPDATE shops SET website = $1, updated_at = NOW() WHERE shop_id = $2`,
+			cleanOrNil(p.Website), shopID); err != nil {
+			return fmt.Errorf("website: %w", err)
 		}
-		var err error
-		if url := strings.TrimSpace(*v); url == "" {
-			_, err = tx.Exec(`DELETE FROM socials WHERE shop_id = $1 AND platform = $2`, shopID, sp.platform)
-		} else {
-			_, err = tx.Exec(
-				`INSERT INTO socials (shop_id, platform, url) VALUES ($1, $2, $3)
-				 ON CONFLICT (shop_id, platform) DO UPDATE SET url = EXCLUDED.url, updated_at = NOW()`,
-				shopID, sp.platform, url)
+	}
+	if p.InstagramURL != nil {
+		if _, err := tx.Exec(`UPDATE shops SET instagram_url = $1, updated_at = NOW() WHERE shop_id = $2`,
+			cleanOrNil(p.InstagramURL), shopID); err != nil {
+			return fmt.Errorf("instagram_url: %w", err)
 		}
-		if err != nil {
-			return fmt.Errorf("socials %s: %w", sp.platform, err)
+	}
+	if p.FacebookURL != nil {
+		if _, err := tx.Exec(`UPDATE shops SET facebook_url = $1, updated_at = NOW() WHERE shop_id = $2`,
+			cleanOrNil(p.FacebookURL), shopID); err != nil {
+			return fmt.Errorf("facebook_url: %w", err)
 		}
 	}
 	return nil
@@ -295,26 +281,27 @@ func (s *server) applyShopUpdate(shopID int64, p *shopPayload) error {
 	}
 	defer tx.Rollback()
 
-	var addressID sql.NullInt64
-	err = tx.QueryRow(`SELECT address_id FROM shops WHERE shop_id = $1 FOR UPDATE`, shopID).Scan(&addressID)
+	var postal sql.NullString
+	err = tx.QueryRow(`SELECT postal_code FROM shops WHERE shop_id = $1 FOR UPDATE`, shopID).Scan(&postal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errShopNotFound
 	}
 	if err != nil {
 		return err
 	}
+	hasAddress := postal.Valid
 
 	if p.Address != nil {
-		addressID, err = s.applyAddress(tx, addressID, p.Address)
-		if err != nil {
+		if err := s.applyAddress(tx, shopID, hasAddress, p.Address); err != nil {
 			return err
 		}
+		hasAddress = true // applyAddress either updated the existing one or inserted a full one
 	}
 
 	// Explicit location wins; otherwise a changed address is re-geocoded so
 	// the pin never points at the previous address.
 	if p.Location != nil || p.Address != nil {
-		if !addressID.Valid {
+		if !hasAddress {
 			return errNoAddress
 		}
 		var lat, lon sql.NullFloat64
@@ -325,7 +312,7 @@ func (s *server) applyShopUpdate(shopID int64, p *shopPayload) error {
 			var a addressPayload
 			err := tx.QueryRow(
 				`SELECT street_number, street_name, city, COALESCE(borough, ''), postal_code
-				 FROM addresses WHERE address_id = $1`, addressID.Int64,
+				 FROM shops WHERE shop_id = $1`, shopID,
 			).Scan(&a.StreetNumber, &a.StreetName, &a.City, &a.Borough, &a.PostalCode)
 			if err != nil {
 				return err
@@ -338,10 +325,10 @@ func (s *server) applyShopUpdate(shopID int64, p *shopPayload) error {
 			}
 		}
 		_, err = tx.Exec(
-			`UPDATE addresses
+			`UPDATE shops
 			 SET location = ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, updated_at = NOW()
-			 WHERE address_id = $3`,
-			lon, lat, addressID.Int64)
+			 WHERE shop_id = $3`,
+			lon, lat, shopID)
 		if err != nil {
 			return err
 		}
@@ -353,14 +340,13 @@ func (s *server) applyShopUpdate(shopID int64, p *shopPayload) error {
 		     status = COALESCE($2::shop_status, status),
 		     phone = COALESCE($3, phone),
 		     email = COALESCE($4, email),
-		     address_id = $5,
 		     updated_at = NOW()
-		 WHERE shop_id = $6`,
-		p.Name, p.Status, p.Phone, p.Email, addressID, shopID)
+		 WHERE shop_id = $5`,
+		p.Name, p.Status, p.Phone, p.Email, shopID)
 	if err != nil {
 		return err
 	}
-	if err := upsertSocials(tx, shopID, p); err != nil {
+	if err := applySocials(tx, shopID, p); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -368,48 +354,46 @@ func (s *server) applyShopUpdate(shopID int64, p *shopPayload) error {
 
 var errIncompleteAddress = errors.New("shop has no address yet; street_number, street_name, city and postal_code are required")
 
-// applyAddress patches the shop's existing address row, or inserts a new row
-// when the shop has none (which requires the full address).
-func (s *server) applyAddress(tx *sql.Tx, addressID sql.NullInt64, a *addressPayload) (sql.NullInt64, error) {
-	if addressID.Valid {
+// applyAddress patches the shop's existing address fields, or sets them for
+// the first time when the shop has none (which requires the full address).
+func (s *server) applyAddress(tx *sql.Tx, shopID int64, hasAddress bool, a *addressPayload) error {
+	if hasAddress {
 		_, err := tx.Exec(
-			`UPDATE addresses
+			`UPDATE shops
 			 SET street_number = COALESCE($1, street_number),
 			     street_name = COALESCE($2, street_name),
 			     city = COALESCE($3, city),
 			     borough = COALESCE(NULLIF($4, ''), borough),
 			     postal_code = COALESCE($5, postal_code),
 			     updated_at = NOW()
-			 WHERE address_id = $6`,
-			a.StreetNumber, a.StreetName, a.City, a.Borough, a.PostalCode, addressID.Int64)
-		return addressID, err
+			 WHERE shop_id = $6`,
+			a.StreetNumber, a.StreetName, a.City, a.Borough, a.PostalCode, shopID)
+		return err
 	}
 	for _, v := range []*string{a.StreetNumber, a.StreetName, a.City, a.PostalCode} {
 		if v == nil || strings.TrimSpace(*v) == "" {
-			return addressID, errIncompleteAddress
+			return errIncompleteAddress
 		}
 	}
-	var id int64
-	err := tx.QueryRow(
-		`INSERT INTO addresses (street_number, street_name, city, borough, postal_code)
-		 VALUES ($1, $2, $3, NULLIF($4, ''), $5)
-		 RETURNING address_id`,
-		*a.StreetNumber, *a.StreetName, *a.City, a.toNominatim().Borough, *a.PostalCode,
-	).Scan(&id)
-	return sql.NullInt64{Int64: id, Valid: err == nil}, err
+	_, err := tx.Exec(
+		`UPDATE shops
+		 SET street_number = $1, street_name = $2, city = $3, borough = NULLIF($4, ''), postal_code = $5,
+		     updated_at = NOW()
+		 WHERE shop_id = $6`,
+		*a.StreetNumber, *a.StreetName, *a.City, a.toNominatim().Borough, *a.PostalCode, shopID)
+	return err
 }
 
 const shopSelect = `
 	SELECT shop_id, name, status, phone, email, website, instagram_url, facebook_url,
-	       address_id, street_number, street_name, city, borough, postal_code,
+	       street_number, street_name, city, borough, postal_code,
 	       ST_X(location::geometry), ST_Y(location::geometry), tags
-	FROM shop_details`
+	FROM shops`
 
 // scanShopJSON reads one shopSelect row.
 func scanShopJSON(scan func(...any) error) (shopJSON, error) {
 	var (
 		out      shopJSON
-		addrID   sql.NullInt64
 		street   sql.NullString
 		number   sql.NullString
 		city     sql.NullString
@@ -419,11 +403,11 @@ func scanShopJSON(scan func(...any) error) (shopJSON, error) {
 	)
 	err := scan(&out.ID, &out.Name, &out.Status, &out.Phone, &out.Email, &out.Website,
 		&out.InstagramURL, &out.FacebookURL,
-		&addrID, &number, &street, &city, &borough, &postal, &lon, &lat, pq.Array(&out.Tags))
+		&number, &street, &city, &borough, &postal, &lon, &lat, pq.Array(&out.Tags))
 	if err != nil {
 		return out, err
 	}
-	if addrID.Valid {
+	if postal.Valid {
 		out.Address = &addressJSON{
 			StreetNumber: number.String,
 			StreetName:   street.String,

@@ -13,6 +13,8 @@
   header h1 { font-size: 17px; margin: 0 8px 0 0; }
   nav a { color: #1565c0; text-decoration: none; font-size: 14px; }
   nav a:hover { text-decoration: underline; }
+  #export { color: #1565c0; text-decoration: none; font-size: 14px; }
+  #export:hover { text-decoration: underline; }
   #search { border: 1px solid #ccc; border-radius: 4px; padding: 5px 8px; width: 220px; font-size: 14px; }
   #filters { display: flex; gap: 6px; }
   .tag-btn {
@@ -48,6 +50,7 @@
     <button type="button" class="tag-btn" id="non-profit" aria-pressed="false">Community</button>
   </div>
   <span id="count"></span>
+  <a id="export" href="#" download>Export CSV</a>
 </header>
 <main id="list"></main>
 
@@ -104,6 +107,16 @@
       list.appendChild(empty);
     }
     document.getElementById('count').textContent = `${visible.length} / ${shops.length} shops`;
+
+    const statuses = ['active', 'closed', 'inactive'].filter(st => show[st]);
+    const categories = [];
+    if (showCategory.forProfit) categories.push('for-profit');
+    if (showCategory.nonProfit) categories.push('non-profit');
+    const params = new URLSearchParams();
+    if (statuses.length) params.set('status', statuses.join(','));
+    if (categories.length) params.set('category', categories.join(','));
+    if (q) params.set('q', document.getElementById('search').value.trim());
+    document.getElementById('export').href = '/api/shops/export.csv?' + params;
   }
 
   fetch('/api/shops/all')

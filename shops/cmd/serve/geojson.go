@@ -42,11 +42,6 @@ type props struct {
 func toFeatureCollection(rows []shopRow) featureCollection {
 	fc := featureCollection{Type: "FeatureCollection", Features: []feature{}}
 	for _, r := range rows {
-		parts := []string{r.StreetNumber + " " + r.StreetName}
-		if r.City != "" {
-			parts = append(parts, r.City)
-		}
-		parts = append(parts, r.PostalCode)
 		fc.Features = append(fc.Features, feature{
 			Type:     "Feature",
 			Geometry: geometry{Type: "Point", Coordinates: [2]float64{r.Lon, r.Lat}},
@@ -54,10 +49,21 @@ func toFeatureCollection(rows []shopRow) featureCollection {
 				ID:      r.ID,
 				Name:    r.Name,
 				Status:  r.Status,
-				Address: strings.Join(parts, ", "),
+				Address: formatAddress(r.StreetNumber, r.StreetName, r.City, r.PostalCode),
 				Tags:    r.Tags,
 			},
 		})
 	}
 	return fc
+}
+
+// formatAddress joins address parts the way shops.html does: number and
+// street together, city only when known, postal code always last.
+func formatAddress(streetNumber, streetName, city, postalCode string) string {
+	parts := []string{streetNumber + " " + streetName}
+	if city != "" {
+		parts = append(parts, city)
+	}
+	parts = append(parts, postalCode)
+	return strings.Join(parts, ", ")
 }
