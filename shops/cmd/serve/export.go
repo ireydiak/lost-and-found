@@ -114,7 +114,7 @@ func writeCSV(w interface{ Write([]byte) (int, error) }, rows []exportRow) error
 const exportSelect = `
 	SELECT name, status, street_number, street_name, city, postal_code,
 	       phone, email, website, neq_id, neq_etab_id, tags
-	FROM shop_details
+	FROM shops
 	ORDER BY name`
 
 // loadExportRows reads every shop for CSV export; filtering happens in Go so

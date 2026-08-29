@@ -94,7 +94,7 @@ func loadShops(db *sql.DB) ([]shopRow, error) {
 	rows, err := db.Query(
 		`SELECT shop_id, name, status, street_number, street_name, city, postal_code,
 		        ST_X(location::geometry), ST_Y(location::geometry), tags
-		 FROM shop_details
+		 FROM shops
 		 WHERE location IS NOT NULL
 		 ORDER BY name`)
 	if err != nil {
