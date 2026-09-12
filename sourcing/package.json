@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "clean": "rm -rf dist/*",
-    "build": "pnpm clean && tsc"
+    "build": "pnpm clean && tsc",
+    "run:facebook": "pnpm build && node ./dist/facebook.js"
   },
   "keywords": [],
   "author": "Jean-Charles Verdier",

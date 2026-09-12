@@ -4,3 +4,6 @@
 build:
 	pnpm build
 
+.PHONY: facebook
+facebook:
+	pnpm run:facebook
