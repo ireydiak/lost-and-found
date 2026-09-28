@@ -1,140 +1,111 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
-	"regexp"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-)
-
-type Post struct {
-	PosInset    int       `json:"posInset"`
-	Author      string    `json:"author"`
-	Description *string   `json:"description"`
-	Date        time.Time `json:"date"`
-	Picture     *string   `json:"picture"`
-}
-
-const (
-	postSelector        = `div[role="feed"] div[aria-posinset]`
-	authorSelector      = `[data-ad-rendering-role="profile_name"] a`
-	dateSelector        = `a[href^="?__cft__"]`
-	descriptionSelector = `[data-ad-rendering-role="story_message"] div[dir="auto"]`
-	pictureSelector     = `img[data-imgperflogname="feedImage"]`
-
-	// U+034F COMBINING GRAPHEME JOINER — Facebook interleaves this invisible
-	// character between the digits/letters of relative timestamps to make
-	// naive text scraping harder (e.g. "1h" arrives as "1͏h͏").
-	graphemeJoinerUnicode = "\u034F"
-)
-
-var (
-	dateRegex = regexp.MustCompile(`^(\d+)\s*([mhdw])$`)
+	"extractor/internal/fbpost"
 )
 
 func main() {
-	pathToFile := "../sourcing/debug-page.html"
-	f, err := os.Open(pathToFile)
+	watchDir := flag.String("watch", "", "watch this directory for new .html files and extract each one as it appears, instead of extracting a single file")
+	flag.Parse()
+
+	if *watchDir != "" {
+		watch(*watchDir)
+		return
+	}
+
+	args := flag.Args()
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "usage:\n  %s <path-to-html-file>\n  %s --watch <directory>\n", os.Args[0], os.Args[0])
+		os.Exit(1)
+	}
+
+	posts, err := fbpost.ExtractPostsFromFile(args[0])
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	printJSON(posts)
+}
 
-	doc, err := goquery.NewDocumentFromReader(f)
+func printJSON(posts []fbpost.Post) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(posts); err != nil {
+		panic(err)
+	}
+}
+
+// watch polls dir for new .html files and extracts each one as it appears —
+// the automatic counterpart to manually running this program once per file.
+// Files already present when watching starts are NOT reprocessed; run this
+// program's single-file mode or `merge` on the directory first to catch up
+// on anything saved before the watcher was started.
+//
+// A newly-created file is only processed once its size has been observed as
+// stable across two consecutive polls, to avoid reading it mid-write (e.g.
+// while save-post.sh's shell redirect is still in progress).
+func watch(dir string) {
+	const pollInterval = 2 * time.Second
+
+	seen := map[string]bool{}
+	pendingSize := map[string]int64{}
+
+	initial, err := os.ReadDir(dir)
 	if err != nil {
 		panic(err)
 	}
+	for _, e := range initial {
+		seen[e.Name()] = true
+	}
 
-	postsMap := map[int]Post{}
-	doc.Find(postSelector).Each(func(_ int, s *goquery.Selection) {
-		posInsetStr, ok := s.Attr("aria-posinset")
-		if !ok {
-			return
-		}
-		posInset, err := strconv.Atoi(posInsetStr)
+	fmt.Fprintf(os.Stderr, "Watching %s for new .html files (Ctrl+C to stop)...\n", dir)
+
+	for {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return
+			fmt.Fprintln(os.Stderr, "error reading directory:", err)
+			time.Sleep(pollInterval)
+			continue
 		}
 
-		if _, exists := postsMap[posInset]; exists {
-			return
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || seen[name] || !strings.HasSuffix(name, ".html") {
+				continue
+			}
+
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			size := info.Size()
+
+			if prevSize, ok := pendingSize[name]; ok && prevSize == size {
+				delete(pendingSize, name)
+				seen[name] = true
+				processNewFile(filepath.Join(dir, name))
+			} else {
+				pendingSize[name] = size
+			}
 		}
 
-		authorSel := s.Find(authorSelector).First()
-		dateSel := s.Find(dateSelector).First()
-
-		if authorSel.Length() == 0 || dateSel.Length() == 0 {
-			return
-		}
-
-		dateTime, err := parseDate(dateSel)
-		if err != nil {
-			return
-		}
-
-		p := Post{
-			Author:      authorSel.Text(),
-			Date:        *dateTime,
-			Description: optionalText(s.Find(descriptionSelector).First()),
-			Picture:     optionalText(s.Find(pictureSelector).First()),
-			PosInset:    posInset,
-		}
-		postsMap[posInset] = p
-	})
-
-	fmt.Println(len(postsMap))
+		time.Sleep(pollInterval)
+	}
 }
 
-func optionalText(s *goquery.Selection) *string {
-	if s.Length() == 0 {
-		return nil
-	}
-	text := strings.TrimSpace(s.Text())
-	return &text
-}
-
-func parseDate(s *goquery.Selection) (*time.Time, error) {
-	if s.Length() == 0 {
-		return nil, fmt.Errorf("failed to find date from selector")
-	}
-
-	text := strings.ReplaceAll(s.Text(), graphemeJoinerUnicode, "")
-	text = strings.TrimSpace(text)
-
-	matches := dateRegex.FindStringSubmatch(text)
-	if matches == nil {
-		return nil, fmt.Errorf("failed to find date from regex")
-	}
-
-	// e.g. ["1h", "1", "h"]
-	if len(matches) != 3 {
-		return nil, fmt.Errorf("failed to parse date: expected len(matches) == 3; got %d", len(matches))
-	}
-
-	nStr, unit := matches[1], matches[2]
-	n, err := strconv.Atoi(nStr)
+func processNewFile(path string) {
+	posts, err := fbpost.ExtractPostsFromFile(path)
 	if err != nil {
-		return nil, err
+		fmt.Fprintf(os.Stderr, "[%s] skipping %s: %v\n", time.Now().Format("15:04:05"), filepath.Base(path), err)
+		return
 	}
-
-	var duration time.Duration
-	switch unit {
-	case "m":
-		duration = time.Duration(n) * time.Minute
-	case "h":
-		duration = time.Duration(n) * time.Hour
-	case "d":
-		duration = time.Duration(n) * time.Hour * 24
-	case "w":
-		duration = time.Duration(n) * time.Hour * 24 * 7
-	default:
-		return nil, fmt.Errorf("unrecognized date unit: %q", unit)
-	}
-
-	result := time.Now().Add(-duration)
-	return &result, nil
+	fmt.Fprintf(os.Stderr, "[%s] extracted %d post(s) from %s\n", time.Now().Format("15:04:05"), len(posts), filepath.Base(path))
+	printJSON(posts)
 }
