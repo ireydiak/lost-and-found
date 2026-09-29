@@ -1,0 +1,173 @@
+{{define "inspect.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Classifier — Inspect</title>
+  <style>
+    body { font-family: sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .meta { color: #666; font-size: 0.85em; font-family: monospace; word-break: break-all; }
+    textarea { width: 100%; font-family: monospace; font-size: 0.9em; padding: 8px; box-sizing: border-box; }
+    button { padding: 8px 16px; margin-top: 8px; }
+    pre { background: #f6f6f6; padding: 12px; overflow-x: auto; font-size: 0.8em; line-height: 1.4; border: 1px solid #ddd; }
+    .result { border: 1px solid #ddd; margin: 8px 0; padding: 8px; }
+    .result summary { cursor: pointer; font-family: monospace; font-size: 0.85em; }
+    .error { color: #b00020; white-space: pre-wrap; }
+    h2 { margin-top: 32px; }
+  </style>
+</head>
+<body>
+  <p><a href="/">&larr; Back to triage</a> &middot; <a href="/raw?html_hash={{.HTMLHash}}" target="_blank">Raw text</a></p>
+  <p class="meta">html_hash: {{.HTMLHash}}</p>
+
+  <h2>Query</h2>
+  <p>
+    JavaScript expression, evaluated with <code>doc</code> bound to the parsed (inert -- embedded
+    scripts don't run) document. Same query language the extractor's own selectors use, e.g.
+    <code>doc.querySelectorAll('div[dir="auto"]')</code>.
+  </p>
+  <textarea id="query" rows="3">doc.querySelectorAll('div[dir="auto"]')</textarea><br>
+  <button id="run">Run</button>
+  <div id="results"></div>
+
+  <h2>Pretty-printed HTML</h2>
+  <pre id="pretty">Loading…</pre>
+
+  <script>
+    (function () {
+      var htmlHash = {{.HTMLHash}};
+      var resultsEl = document.getElementById('results');
+      var prettyEl = document.getElementById('pretty');
+      var queryEl = document.getElementById('query');
+      var runBtn = document.getElementById('run');
+      var doc = null;
+
+      var VOID_ELEMENTS = {
+        area: 1, base: 1, br: 1, col: 1, embed: 1, hr: 1, img: 1, input: 1,
+        link: 1, meta: 1, param: 1, source: 1, track: 1, wbr: 1
+      };
+
+      function escapeHtml(s) {
+        return s.replace(/[&<>"]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+      }
+
+      // Walks a DOM node and re-serializes it with 2-space indentation per
+      // depth level -- there's no built-in pretty-printer for HTML in either
+      // the DOM API or Go's html/template, so this is hand-rolled. Verbose
+      // (Facebook's markup nests deeply with long class lists) but far more
+      // scannable than the single minified line the file is saved as.
+      function prettyPrint(node, depth) {
+        depth = depth || 0;
+        var indent = new Array(depth + 1).join('  ');
+
+        if (node.nodeType === Node.TEXT_NODE) {
+          var text = node.textContent.trim();
+          return text ? indent + escapeHtml(text) + '\n' : '';
+        }
+        if (node.nodeType === Node.COMMENT_NODE) {
+          return indent + '<!--' + node.textContent + '-->\n';
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+          return '';
+        }
+
+        var tag = node.tagName.toLowerCase();
+        var attrs = Array.prototype.map.call(node.attributes, function (a) {
+          return ' ' + a.name + '="' + escapeHtml(a.value) + '"';
+        }).join('');
+
+        if (VOID_ELEMENTS[tag]) {
+          return indent + '<' + tag + attrs + '>\n';
+        }
+
+        var children = '';
+        for (var i = 0; i < node.childNodes.length; i++) {
+          children += prettyPrint(node.childNodes[i], depth + 1);
+        }
+
+        if (!children) {
+          return indent + '<' + tag + attrs + '></' + tag + '>\n';
+        }
+        return indent + '<' + tag + attrs + '>\n' + children + indent + '</' + tag + '>\n';
+      }
+
+      // Tried as an expression first (the common case: a bare selector
+      // call) -- falls back to a statement block for multi-line code with
+      // its own explicit return.
+      function runQuery(doc, code) {
+        try {
+          return new Function('doc', 'return (' + code + ');')(doc);
+        } catch (asExpression) {
+          return new Function('doc', code)(doc);
+        }
+      }
+
+      function renderResult(value) {
+        resultsEl.innerHTML = '';
+
+        var items;
+        if (value instanceof window.Node) {
+          items = [value];
+        } else if (value && typeof value.length === 'number' && typeof value !== 'string') {
+          items = Array.prototype.slice.call(value);
+        } else {
+          items = [value];
+        }
+
+        var summary = document.createElement('p');
+        summary.textContent = items.length + ' result(s)';
+        resultsEl.appendChild(summary);
+
+        items.forEach(function (item) {
+          var box = document.createElement('div');
+          box.className = 'result';
+
+          if (item instanceof window.Node) {
+            var details = document.createElement('details');
+            details.open = items.length === 1;
+            var sum = document.createElement('summary');
+            var tag = item.nodeType === Node.ELEMENT_NODE ? '<' + item.tagName.toLowerCase() + '>' : '#text';
+            var preview = (item.textContent || '').trim().slice(0, 80);
+            sum.textContent = tag + ' ' + preview;
+            var pre = document.createElement('pre');
+            pre.textContent = prettyPrint(item);
+            details.appendChild(sum);
+            details.appendChild(pre);
+            box.appendChild(details);
+          } else {
+            var plainPre = document.createElement('pre');
+            plainPre.textContent = typeof item === 'object' ? JSON.stringify(item, null, 2) : String(item);
+            box.appendChild(plainPre);
+          }
+          resultsEl.appendChild(box);
+        });
+      }
+
+      runBtn.addEventListener('click', function () {
+        resultsEl.innerHTML = '';
+        try {
+          renderResult(runQuery(doc, queryEl.value));
+        } catch (e) {
+          var err = document.createElement('p');
+          err.className = 'error';
+          err.textContent = e.message;
+          resultsEl.appendChild(err);
+        }
+      });
+
+      fetch('/raw?html_hash=' + encodeURIComponent(htmlHash))
+        .then(function (res) { return res.text(); })
+        .then(function (text) {
+          doc = new DOMParser().parseFromString(text, 'text/html');
+          prettyEl.textContent = prettyPrint(doc.body);
+        })
+        .catch(function (e) {
+          prettyEl.textContent = 'Failed to load: ' + e.message;
+        });
+    })();
+  </script>
+</body>
+</html>
+{{end}}

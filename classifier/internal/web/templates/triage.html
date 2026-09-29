@@ -1,0 +1,63 @@
+{{define "triage.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Classifier — Triage</title>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    img { max-width: 100%; display: block; margin: 8px 0; }
+    .meta { color: #666; font-size: 0.9em; }
+    .error { color: #b00020; }
+    .debug { color: #999; font-size: 0.8em; font-family: monospace; margin: 4px 0; word-break: break-all; }
+    fieldset { margin-top: 16px; border: none; padding: 0; }
+    label { display: inline-block; margin-right: 16px; }
+    button { margin-top: 12px; padding: 8px 16px; }
+    .skip-form { display: inline; }
+    .skip-form button { background: none; border: 1px solid #999; }
+  </style>
+</head>
+<body>
+  <p class="meta">{{.Remaining}} post(s) remaining &middot; <a href="/search">Search &amp; retag</a></p>
+
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .Post}}
+    {{if .Post.Title}}<h2>{{.Post.Title}}</h2>{{end}}
+    <p class="meta">{{.Post.Author}} &middot; {{.Post.Date.Format "2006-01-02"}}</p>
+    {{if .Post.Description}}<p>{{.Post.Description}}</p>{{end}}
+
+    {{range .Post.Assets}}
+      <img src="{{.URL}}" alt="">
+    {{end}}
+
+    <p class="debug">
+      html_hash: {{.Post.HTMLHash}}<br>
+      file: {{.Post.Filename}}<br>
+      sourced: {{.Post.SourcedAt.Format "2006-01-02 15:04:05"}}<br>
+      <a href="/inspect?html_hash={{.Post.HTMLHash}}" target="_blank">Inspect raw HTML</a>
+    </p>
+
+    <form method="POST" action="/tag">
+      <input type="hidden" name="html_hash" value="{{.Post.HTMLHash}}">
+      <fieldset>
+        {{range .Tags}}
+          <label>
+            <input type="checkbox" name="tag_id" value="{{.ID}}"> {{.Name}}
+          </label>
+        {{end}}
+      </fieldset>
+      <button type="submit">Save &amp; Next</button>
+    </form>
+
+    <form class="skip-form" method="POST" action="/skip">
+      <input type="hidden" name="html_hash" value="{{.Post.HTMLHash}}">
+      <button type="submit">Skip (not ready)</button>
+    </form>
+  {{else}}
+    <h1>All caught up!</h1>
+    <p>No untagged posts remaining.</p>
+  {{end}}
+</body>
+</html>
+{{end}}
