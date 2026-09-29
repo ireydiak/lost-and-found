@@ -1,0 +1,71 @@
+{{define "search.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Classifier — Search</title>
+  <style>
+    body { font-family: sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    img { max-width: 100%; display: block; margin: 8px 0; }
+    .meta { color: #666; font-size: 0.9em; }
+    .debug { color: #999; font-size: 0.8em; font-family: monospace; margin: 4px 0; word-break: break-all; }
+    .current-tags { font-size: 0.85em; color: #444; }
+    .result { border-bottom: 1px solid #ddd; padding: 20px 0; }
+    .search-form input[type="text"] { width: 60%; padding: 8px; }
+    fieldset { margin-top: 8px; border: none; padding: 0; }
+    label { display: inline-block; margin-right: 16px; }
+    button { padding: 6px 14px; }
+  </style>
+</head>
+<body>
+  <p><a href="/">&larr; Back to triage</a></p>
+  <h1>Search</h1>
+
+  <form class="search-form" method="GET" action="/search">
+    <input type="text" name="q" value="{{.Query}}" placeholder="Search author or description…" autofocus>
+    <button type="submit">Search</button>
+  </form>
+
+  {{if .Query}}
+    <p class="meta">{{len .Results}} result(s) for &ldquo;{{.Query}}&rdquo;</p>
+  {{end}}
+
+  {{$tags := .Tags}}
+  {{range .Results}}
+    {{$post := .}}
+    <div class="result">
+      {{if .Title}}<h3>{{.Title}}</h3>{{end}}
+      <p class="meta">{{.Author}} &middot; {{.Date.Format "2006-01-02"}}</p>
+      {{if .Description}}<p>{{.Description}}</p>{{end}}
+
+      {{range .Assets}}
+        <img src="{{.URL}}" alt="">
+      {{end}}
+
+      <p class="debug">
+        html_hash: {{.HTMLHash}}<br>
+        file: {{.Filename}}<br>
+        <a href="/inspect?html_hash={{.HTMLHash}}" target="_blank">Inspect raw HTML</a>
+      </p>
+
+      <p class="current-tags">
+        Current: {{if .Tags}}{{range .Tags}}{{.Name}} {{end}}{{else}}<em>untagged</em>{{end}}
+      </p>
+
+      <form method="POST" action="/retag">
+        <input type="hidden" name="html_hash" value="{{.HTMLHash}}">
+        <input type="hidden" name="q" value="{{$.Query}}">
+        <fieldset>
+          {{range $tags}}
+            <label>
+              <input type="checkbox" name="tag_id" value="{{.ID}}" {{if $post.HasTag .ID}}checked{{end}}> {{.Name}}
+            </label>
+          {{end}}
+        </fieldset>
+        <button type="submit">Save tags</button>
+      </form>
+    </div>
+  {{end}}
+</body>
+</html>
+{{end}}
