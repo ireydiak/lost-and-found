@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"domain"
 	"extractor/internal/fbpost"
 )
 
@@ -27,7 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var oldest, newest *fbpost.Post
+	var oldest, newest *domain.Post
 	total := 0
 
 	for _, path := range files {

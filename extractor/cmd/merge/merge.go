@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"domain"
 	"extractor/internal/fbpost"
 )
 
@@ -24,7 +25,7 @@ type dedupeKey struct {
 	dateUnix    int64
 }
 
-func dedupeKeyFor(p fbpost.Post) dedupeKey {
+func dedupeKeyFor(p domain.Post) dedupeKey {
 	desc := ""
 	if p.Description != nil {
 		desc = *p.Description
@@ -49,7 +50,7 @@ func main() {
 	}
 	sort.Strings(files)
 
-	seen := map[dedupeKey]fbpost.Post{}
+	seen := map[dedupeKey]domain.Post{}
 
 	for _, path := range files {
 		// Each file's own modification time is used as "now" for resolving
@@ -70,7 +71,7 @@ func main() {
 		}
 	}
 
-	merged := make([]fbpost.Post, 0, len(seen))
+	merged := make([]domain.Post, 0, len(seen))
 	for _, p := range seen {
 		merged = append(merged, p)
 	}

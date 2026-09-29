@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"domain"
 	"extractor/internal/fbpost"
 )
 
@@ -23,18 +25,50 @@ func main() {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage:\n  %s <path-to-html-file>\n  %s --watch <directory>\n", os.Args[0], os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage:\n  %s <path-to-html-file>\n  %s <directory-of-html-files>\n  %s --watch <directory>\n", os.Args[0], os.Args[0], os.Args[0])
 		os.Exit(1)
 	}
 
-	posts, err := fbpost.ExtractPostsFromFile(args[0])
+	path := args[0]
+	info, err := os.Stat(path)
+	if err != nil {
+		panic(err)
+	}
+
+	if info.IsDir() {
+		printJSON(extractDir(path))
+		return
+	}
+
+	posts, err := fbpost.ExtractPostsFromFile(path)
 	if err != nil {
 		panic(err)
 	}
 	printJSON(posts)
 }
 
-func printJSON(posts []fbpost.Post) {
+// extractDir extracts posts from every .html file directly inside dir
+// (non-recursive), skipping files that fail to extract.
+func extractDir(dir string) []domain.Post {
+	files, err := filepath.Glob(filepath.Join(dir, "*.html"))
+	if err != nil {
+		panic(err)
+	}
+	sort.Strings(files)
+
+	var all []domain.Post
+	for _, f := range files {
+		posts, err := fbpost.ExtractPostsFromFile(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "skipping %s: %v\n", f, err)
+			continue
+		}
+		all = append(all, posts...)
+	}
+	return all
+}
+
+func printJSON(posts []domain.Post) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(posts); err != nil {

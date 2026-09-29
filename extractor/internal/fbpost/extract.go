@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+
+	"domain"
 )
 
 // Matches a CSS background-image URL, e.g. background-image: url("https://...")
@@ -21,12 +23,14 @@ var backgroundImageURLRegex = regexp.MustCompile(`background-image:\s*url\(["']?
 //
 // A post missing a required field (author or a parseable date) is skipped
 // entirely rather than included with a zero value. Optional fields
-// (description, picture) are nil when absent.
-func ExtractPosts(doc *goquery.Document, now time.Time) []Post {
+// (description, picture, facebook ID) are nil/empty when absent. HTMLHash is
+// left unset here -- it depends on the raw file bytes, which this function
+// doesn't have access to; see ExtractPostsFromFile.
+func ExtractPosts(doc *goquery.Document, now time.Time) []domain.Post {
 	years := newYearInferer(now.Year())
 
-	var posts []Post
-	for i, boundary := range findPosts(doc) {
+	var posts []domain.Post
+	for _, boundary := range findPosts(doc) {
 		scope := goquery.NewDocumentFromNode(lowestCommonAncestor(boundary.author, boundary.message)).Selection
 
 		// Usually an <a> (a real profile link). Facebook's "Anonymous
@@ -50,12 +54,17 @@ func ExtractPosts(doc *goquery.Document, now time.Time) []Post {
 			continue
 		}
 
-		posts = append(posts, Post{
+		var assets []domain.Asset
+		if picture := extractPicture(scope); picture != nil {
+			assets = append(assets, domain.Asset{URL: *picture, Type: domain.AssetTypePicture})
+		}
+
+		posts = append(posts, domain.Post{
 			Author:      authorName,
 			Date:        *dateTime,
 			Description: extractDescription(scope),
-			Picture:     extractPicture(scope),
-			PosInset:    i,
+			Assets:      assets,
+			FacebookID:  extractFacebookID(scope),
 		})
 	}
 
@@ -86,17 +95,20 @@ func findPostDate(post *goquery.Selection, now time.Time, years *yearInferer) (*
 }
 
 // extractDescription reads a post's text. Most posts nest their text in one
-// or more div[dir="auto"] elements (descriptionSelector); if none are found,
-// fall back to the post's outer span[dir="auto"] wrapper — used by a
-// different post template (a bold "title" line via <h3><strong>, followed
-// by one or more plain paragraph divs, all wrapped in one span[dir="auto"])
-// that has no div[dir="auto"] of its own. The fallback clones the span and
-// strips any role="button" descendant first — Facebook's "See more" expand
-// link lives as a sibling inside that same span and would otherwise get
-// appended to the text.
+// or more div[dir="auto"] elements (descriptionSelector) -- Facebook renders
+// each paragraph/line of a multi-line post as its own sibling div, not as
+// nested text within a single container, so every match is joined rather
+// than just the first (see joinParagraphs). If none are found, fall back to
+// the post's outer span[dir="auto"] wrapper — used by a different post
+// template (a bold "title" line via <h3><strong>, followed by one or more
+// plain paragraph divs, all wrapped in one span[dir="auto"]) that has no
+// div[dir="auto"] of its own. The fallback clones the span and strips any
+// role="button" descendant first — Facebook's "See more" expand link lives
+// as a sibling inside that same span and would otherwise get appended to
+// the text.
 func extractDescription(scope *goquery.Selection) *string {
-	if primary := scope.Find(descriptionSelector).First(); primary.Length() > 0 {
-		return optionalText(primary)
+	if primary := scope.Find(descriptionSelector); primary.Length() > 0 {
+		return joinParagraphs(primary)
 	}
 
 	if fallback := scope.Find(descriptionSpanFallbackSelector).First(); fallback.Length() > 0 {
@@ -170,6 +182,30 @@ func extractPicture(scope *goquery.Selection) *string {
 	}
 	url := m[1]
 	return &url
+}
+
+// joinParagraphs concatenates each matched paragraph's text (clearing any
+// role="button" control -- Facebook's "See more" expand link -- from each
+// one first, so a truncated paragraph doesn't get "See more" appended to
+// it), skipping a paragraph nested inside another match so its text isn't
+// counted twice.
+func joinParagraphs(paragraphs *goquery.Selection) *string {
+	var parts []string
+	paragraphs.Each(func(_ int, p *goquery.Selection) {
+		if p.Parent().Closest(descriptionSelector).Length() > 0 {
+			return // nested inside another matched paragraph; already counted
+		}
+		clone := p.Clone()
+		clone.Find(`[role="button"]`).Remove()
+		if text := strings.TrimSpace(clone.Text()); text != "" {
+			parts = append(parts, text)
+		}
+	})
+	if len(parts) == 0 {
+		return nil
+	}
+	joined := strings.Join(parts, "\n")
+	return &joined
 }
 
 func optionalText(s *goquery.Selection) *string {
