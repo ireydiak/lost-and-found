@@ -7,7 +7,9 @@
   "scripts": {
     "clean": "rm -rf dist/*",
     "build": "pnpm clean && tsc",
-    "run:facebook": "pnpm build && node ./dist/facebook.js"
+    "run:facebook": "pnpm build && node ./dist/facebook.js",
+    "run:facebook-chrome": "pnpm build && node ./dist/facebook-with-chrome.js",
+    "run:auth": "pnpm build && node ./dist/save-session.js"
   },
   "keywords": [],
   "author": "Jean-Charles Verdier",

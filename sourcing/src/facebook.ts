@@ -3,12 +3,18 @@ import type { Page } from "playwright-core";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 const AUTH_FILE = "auth.json";
-const OUTPUT_DIR = "raw";
+const OUTPUT_DIR = "raw-chromium-test"; // separate from raw/ (Lightpanda) for a clean A/B comparison
 const SCROLL_ITERATIONS = 15;
 const WAIT_AFTER_SCROLL_MS = 5000;
 
 async function socialSourcing() {
-    const browser = await chromium.connectOverCDP("ws://127.0.0.1:9222")
+    // Experiment: was connectOverCDP("ws://127.0.0.1:9222"), which turned out
+    // to be Lightpanda (a lightweight, non-Chromium browser engine), not real
+    // Chrome. Launching real Playwright-managed Chromium directly here to
+    // test whether Lightpanda's rendering was the cause of posts with no
+    // discoverable timestamp. auth.json is browser-agnostic (just cookies/
+    // localStorage), so it loads fine into a fresh Chromium context.
+    const browser = await chromium.launch({ headless: true });
 
     const context = await browser.newContext({
         storageState: AUTH_FILE

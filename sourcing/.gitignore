@@ -5,3 +5,5 @@ auth.json
 debug-page.html
 debug-screenshot.png
 raw/
+raw-chromium-test/
+raw-chrome-test/
